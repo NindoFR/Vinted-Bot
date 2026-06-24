@@ -713,29 +713,38 @@ async function addUrl() {
   const url   = document.getElementById('url-value').value.trim();
   const label = document.getElementById('url-label').value.trim();
   const errEl = document.getElementById('url-error');
+  const btn   = document.querySelector('#modal-add-url .btn-primary');
+
+  errEl.style.display = 'block';
   errEl.textContent = '';
-  if (!url) { errEl.textContent = 'Colle une URL Vinted.'; return; }
-  if (!url.includes('vinted.fr')) { errEl.textContent = "L'URL doit venir de vinted.fr"; return; }
-  const btn = document.querySelector('#modal-add-url .btn-primary');
-  btn.disabled = true; btn.textContent = '⏳ Ajout...';
+
+  if (!url) { errEl.textContent = '⚠️ Colle une URL Vinted.'; return; }
+  if (!url.includes('vinted.fr')) { errEl.textContent = "⚠️ L'URL doit venir de vinted.fr"; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Ajout...';
+  errEl.textContent = '⏳ Connexion au serveur...';
+
   try {
-    const r = await fetch('/api/urls', {
+    const resp = await fetch('/api/urls', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({url, label})
-    }).then(r => r.json());
+    });
+    const r = await resp.json();
     if (r.ok) {
       closeModal('modal-add-url');
       document.getElementById('url-value').value = '';
       document.getElementById('url-label').value = '';
       loadUrls();
     } else {
-      errEl.textContent = r.msg || 'Erreur inconnue';
+      errEl.textContent = '❌ ' + (r.msg || 'Erreur inconnue');
     }
   } catch(e) {
-    errEl.textContent = 'Impossible de joindre le serveur. Le bot est-il lancé ?';
+    errEl.textContent = '❌ Serveur injoignable — lance demarrer.bat puis recharge la page. (' + e.message + ')';
   } finally {
-    btn.disabled = false; btn.textContent = 'Ajouter';
+    btn.disabled = false;
+    btn.textContent = 'Ajouter';
   }
 }
 async function deleteUrl(id) { if (!confirm('Supprimer ?')) return; await fetch(`/api/urls/${id}`, {method:'DELETE'}); loadUrls(); }
