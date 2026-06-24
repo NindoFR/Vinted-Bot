@@ -112,7 +112,18 @@ select.input { cursor: pointer; }
 
 .badge { font-size: 10px; padding: 2px 6px; border-radius: 20px; background: var(--bg3); color: var(--muted); border: 1px solid var(--border); }
 .badge.marque { color: var(--accent); border-color: rgba(9,177,186,0.3); }
+.badge.etat-neuf-tag  { color: #22c55e; border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.08); }
+.badge.etat-neuf      { color: #86efac; border-color: rgba(134,239,172,0.35); background: rgba(134,239,172,0.08); }
+.badge.etat-tres-bon  { color: #09B1BA; border-color: rgba(9,177,186,0.3); background: rgba(9,177,186,0.08); }
+.badge.etat-bon       { color: var(--amber); border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.08); }
+.badge.etat-satisf    { color: var(--orange); border-color: rgba(249,115,22,0.3); background: rgba(249,115,22,0.08); }
 .meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+
+/* ── Score badge ── */
+.score-badge { position: absolute; top: 6px; left: 6px; border-radius: 20px; font-size: 10px; font-weight: 700; padding: 2px 7px; border: none; }
+.score-badge.excellent { background: linear-gradient(135deg,#FFD700,#FFA500); color: #000; }
+.score-badge.good      { background: linear-gradient(135deg,#FF6B35,#FF4500); color: #fff; }
+.score-badge.ok        { background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
 
 .fav-btn { position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.45); border: none; color: #fff; border-radius: 50%; width: 28px; height: 28px; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.15s; }
 .fav-btn:hover { transform: scale(1.2); }
@@ -205,6 +216,10 @@ select.input { cursor: pointer; }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>
       Articles
     </button>
+    <button class="nav-item" onclick="showPage('favoris')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+      Favoris
+    </button>
     <button class="nav-item" onclick="showPage('searches')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       Recherches
@@ -227,6 +242,7 @@ select.input { cursor: pointer; }
     </div>
     <div id="last-scan" style="font-size:10px;color:var(--muted);margin-bottom:8px;"></div>
     <button class="btn-toggle" id="btn-toggle" onclick="toggleBot()">▶ Démarrer</button>
+    <button class="btn-toggle" id="btn-scan-now" onclick="scanNow()" style="margin-top:6px;background:var(--purple)">⚡ Scanner maintenant</button>
   </div>
 </aside>
 
@@ -260,7 +276,10 @@ select.input { cursor: pointer; }
       <div class="filters">
         <input class="input" id="f-search" placeholder="🔍 Rechercher..." style="width:180px" oninput="resetPage();loadArticles()">
         <select class="input" id="f-marque" onchange="resetPage();loadArticles()"><option value="">Toutes les marques</option></select>
-        <input class="input" id="f-prix" type="number" placeholder="Prix max (€)" style="width:120px" oninput="resetPage();loadArticles()">
+        <select class="input" id="f-taille" onchange="resetPage();loadArticles()"><option value="">Toutes les tailles</option></select>
+        <select class="input" id="f-etat" onchange="resetPage();loadArticles()"><option value="">Tous les états</option></select>
+        <input class="input" id="f-prix-min" type="number" placeholder="Prix min (€)" style="width:110px" oninput="resetPage();loadArticles()">
+        <input class="input" id="f-prix" type="number" placeholder="Prix max (€)" style="width:110px" oninput="resetPage();loadArticles()">
         <select class="input" id="f-tri" onchange="resetPage();loadArticles()">
           <option value="newest">Plus récent</option>
           <option value="oldest">Plus ancien</option>
@@ -268,10 +287,20 @@ select.input { cursor: pointer; }
           <option value="prix_desc">Prix ↓</option>
         </select>
         <button class="btn btn-ghost" onclick="clearFilters()">✕ Réinitialiser</button>
+        <button class="btn btn-ghost" onclick="exportCSV()" title="Exporter en CSV">⬇ CSV</button>
         <span style="font-size:12px;color:var(--muted);margin-left:auto" id="articles-count"></span>
       </div>
       <div class="articles-grid" id="articles-grid"></div>
       <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- FAVORIS -->
+    <div class="page" id="page-favoris">
+      <div class="filters">
+        <span style="font-size:13px;color:var(--muted)">❤️ Vos articles favoris</span>
+        <button class="btn btn-ghost" onclick="exportCSV(true)" style="margin-left:auto">⬇ Exporter favoris</button>
+      </div>
+      <div class="articles-grid" id="favoris-grid"></div>
     </div>
 
     <!-- RECHERCHES -->
@@ -295,7 +324,9 @@ select.input { cursor: pointer; }
         <div class="settings-card">
           <h3>Notifications Discord</h3>
           <div class="form-group"><label class="form-label">Webhook URL</label><input class="input full" id="set-webhook" placeholder="https://discord.com/api/webhooks/..."></div>
-          <div style="font-size:11px;color:var(--muted);">Discord → Salon → Paramètres → Intégrations → Webhooks → Nouveau → Copier l'URL</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Discord → Salon → Paramètres → Intégrations → Webhooks → Nouveau → Copier l'URL</div>
+          <button class="btn btn-ghost" onclick="testDiscord()">🔔 Tester Discord</button>
+          <span id="discord-test-msg" style="margin-left:10px;font-size:12px;"></span>
         </div>
         <div class="settings-card half">
           <h3>Intervalle de scan</h3>
@@ -306,6 +337,7 @@ select.input { cursor: pointer; }
           <h3>Filtres prix</h3>
           <div class="form-group"><label class="form-label">Prix minimum (€)</label><input class="input full" id="set-pmin" type="number" value="0"></div>
           <div class="form-group"><label class="form-label">Prix maximum (€)</label><input class="input full" id="set-pmax" type="number" value="9999"></div>
+          <div class="form-group"><label class="form-label">Marge min. pour alerte Discord (€) <span style="color:var(--muted);font-size:10px">— 0 = toujours alerter</span></label><input class="input full" id="set-marge-alerte" type="number" value="0" min="0"></div>
         </div>
         <div class="settings-card" style="grid-column:span 2">
           <button class="btn btn-primary" onclick="saveSettings()">💾 Sauvegarder</button>
@@ -323,6 +355,7 @@ select.input { cursor: pointer; }
     <h3>➕ Ajouter une recherche</h3>
     <div class="form-group"><label class="form-label">Nom de la recherche</label><input class="input full" id="url-label" placeholder="ex: Under Armour taille M moins de 15€"></div>
     <div class="form-group"><label class="form-label">URL Vinted (copie depuis la barre d'adresse)</label><textarea class="input full" id="url-value" rows="3" placeholder="https://www.vinted.fr/catalog?..." style="resize:vertical;font-size:11px;font-family:monospace;"></textarea></div>
+    <div id="url-error" style="font-size:12px;color:var(--red);margin-bottom:8px;min-height:16px;"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('modal-add-url')">Annuler</button>
       <button class="btn btn-primary" onclick="addUrl()">Ajouter</button>
@@ -331,6 +364,18 @@ select.input { cursor: pointer; }
 </div>
 
 <script>
+// ── État → CSS class + label ───────────────────────────────────────────────
+function etatClass(etat) {
+  if (!etat) return '';
+  const e = etat.toLowerCase();
+  if (e.includes('avec étiquette') || e.includes('avec etiquette')) return 'etat-neuf-tag';
+  if (e.includes('sans étiquette') || e.includes('sans etiquette')) return 'etat-neuf';
+  if (e.includes('très bon') || e.includes('tres bon')) return 'etat-tres-bon';
+  if (e.includes('bon état') || e.includes('bon etat')) return 'etat-bon';
+  if (e.includes('satisfaisant')) return 'etat-satisf';
+  return '';
+}
+
 // ── Frais Vinted + Mondial Relay ──────────────────────────────────────────
 function fraisVinted(prixRevente) {
   return Math.round((prixRevente * 0.05 + 0.70) * 100) / 100;
@@ -371,16 +416,18 @@ function toggleTheme() {
 applyTheme(theme);
 
 // ── Navigation ────────────────────────────────────────────────────────────
-const pageTitles = { dashboard:'Dashboard', articles:'Articles', searches:'Recherches', logs:'Journal', settings:'Paramètres' };
+const pageTitles = { dashboard:'Dashboard', articles:'Articles', favoris:'Favoris', searches:'Recherches', logs:'Journal', settings:'Paramètres' };
+const pageOrder = ['dashboard','articles','favoris','searches','logs','settings'];
 let currentPage = 'dashboard';
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  document.querySelectorAll('.nav-item')[['dashboard','articles','searches','logs','settings'].indexOf(name)].classList.add('active');
+  document.querySelectorAll('.nav-item')[pageOrder.indexOf(name)].classList.add('active');
   document.getElementById('page-title').textContent = pageTitles[name];
   currentPage = name;
-  if (name === 'articles') { loadArticles(); loadMarques(); }
+  if (name === 'articles') { loadArticles(); loadMarques(); loadTailles(); loadEtats(); }
+  if (name === 'favoris') loadFavoris();
   if (name === 'searches') loadUrls();
   if (name === 'settings') loadSettings();
 }
@@ -462,8 +509,13 @@ function renderCards(arts, compact = false) {
           <div class="marge-row total"><span>Marge nette</span><span class="marge-val ${margeClass}" id="marge-${a.id}">${marge >= 0 ? '+' : ''}${marge}€</span></div>
         </div>
       </div>`;
+    const scoreBadge = a.score >= 8
+      ? `<span class="score-badge excellent">💎 Excellent</span>`
+      : a.score >= 5 ? `<span class="score-badge good">🔥 Bonne affaire</span>`
+      : a.score >= 3 ? `<span class="score-badge ok">✅ Correct</span>` : '';
     return `
       <div class="article-card" onclick="window.open('${a.url}','_blank')">
+        ${scoreBadge}
         <button class="fav-btn ${a.favori?'on':''}" onclick="event.stopPropagation();toggleFav('${a.id}',this)">♥</button>
         ${a.image_url ? `<img src="${a.image_url}" alt="${a.titre}" loading="lazy" onerror="this.outerHTML='<div class=no-img>🛍️</div>'">` : '<div class="no-img">🛍️</div>'}
         <div class="body">
@@ -473,8 +525,10 @@ function renderCards(arts, compact = false) {
           <div class="meta">
             ${a.taille?`<span class="badge">${a.taille}</span>`:''}
             ${a.marque?`<span class="badge marque">${a.marque}</span>`:''}
+            ${a.etat?`<span class="badge ${etatClass(a.etat)}">${a.etat}</span>`:''}
           </div>
-          <div style="font-size:10px;color:var(--muted);margin-top:4px">${date}</div>
+          ${a.vendeur?`<div style="font-size:10px;color:var(--muted);margin-top:4px">👤 ${a.vendeur}</div>`:''}
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${date}</div>
         </div>
       </div>`;
   }).join('');
@@ -553,28 +607,83 @@ function renderPagedArticles() {
 }
 
 async function loadArticles() {
-  const search = document.getElementById('f-search').value;
-  const marque = document.getElementById('f-marque').value;
-  const prix   = document.getElementById('f-prix').value;
+  const search   = document.getElementById('f-search').value;
+  const marque   = document.getElementById('f-marque').value;
+  const taille   = document.getElementById('f-taille').value;
+  const etat     = document.getElementById('f-etat').value;
+  const prixMin  = document.getElementById('f-prix-min').value;
+  const prixMax  = document.getElementById('f-prix').value;
   const params = new URLSearchParams({ limit: 9999 });
-  if (search) params.set('search', search);
-  if (marque) params.set('marque', marque);
-  if (prix)   params.set('prix_max', prix);
+  if (search)  params.set('search', search);
+  if (marque)  params.set('marque', marque);
+  if (taille)  params.set('taille', taille);
+  if (etat)    params.set('etat', etat);
+  if (prixMin) params.set('prix_min', prixMin);
+  if (prixMax) params.set('prix_max', prixMax);
   allArticles = await fetch('/api/articles?' + params).then(r => r.json());
   renderPagedArticles();
+}
+
+async function loadEtats() {
+  const etats = await fetch('/api/etats').then(r => r.json());
+  const sel = document.getElementById('f-etat');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tous les états</option>' + etats.map(e => `<option value="${e}">${e}</option>`).join('');
+  sel.value = cur;
 }
 async function loadMarques() {
   const marques = await fetch('/api/marques').then(r => r.json());
   const sel = document.getElementById('f-marque');
+  const cur = sel.value;
   sel.innerHTML = '<option value="">Toutes les marques</option>' + marques.map(m => `<option value="${m}">${m}</option>`).join('');
+  sel.value = cur;
+}
+async function loadTailles() {
+  const tailles = await fetch('/api/tailles').then(r => r.json());
+  const sel = document.getElementById('f-taille');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Toutes les tailles</option>' + tailles.map(t => `<option value="${t}">${t}</option>`).join('');
+  sel.value = cur;
 }
 function clearFilters() {
   document.getElementById('f-search').value = '';
   document.getElementById('f-marque').value = '';
+  document.getElementById('f-taille').value = '';
+  document.getElementById('f-etat').value = '';
+  document.getElementById('f-prix-min').value = '';
   document.getElementById('f-prix').value = '';
   document.getElementById('f-tri').value = 'newest';
   resetPage();
   loadArticles();
+}
+
+async function loadFavoris() {
+  const arts = await fetch('/api/articles?favoris=1&limit=9999').then(r => r.json());
+  document.getElementById('favoris-grid').innerHTML = renderCards(arts, false);
+}
+
+function exportCSV(favorisOnly = false) {
+  const url = favorisOnly ? '/api/articles/export?favoris=1' : '/api/articles/export';
+  window.location = url;
+}
+
+async function scanNow() {
+  const btn = document.getElementById('btn-scan-now');
+  btn.disabled = true;
+  btn.textContent = '⏳ Scan en cours...';
+  const r = await fetch('/api/bot/scan-now', { method: 'POST' }).then(r => r.json());
+  if (!r.ok) alert(r.msg);
+  setTimeout(() => { btn.disabled = false; btn.textContent = '⚡ Scanner maintenant'; }, 3000);
+}
+
+async function testDiscord() {
+  const msg = document.getElementById('discord-test-msg');
+  msg.textContent = '⏳ Envoi...';
+  msg.style.color = 'var(--muted)';
+  const r = await fetch('/api/discord/test', { method: 'POST' }).then(r => r.json());
+  msg.textContent = r.ok ? '✓ Message envoyé !' : '✗ ' + r.msg;
+  msg.style.color = r.ok ? 'var(--green)' : 'var(--red)';
+  setTimeout(() => msg.textContent = '', 4000);
 }
 async function toggleFav(id, btn) {
   await fetch(`/api/articles/${id}/favori`, { method: 'POST' });
@@ -601,12 +710,42 @@ async function loadUrls() {
 }
 function openAddUrl() { document.getElementById('modal-add-url').classList.add('open'); }
 async function addUrl() {
-  const url = document.getElementById('url-value').value.trim();
+  const url   = document.getElementById('url-value').value.trim();
   const label = document.getElementById('url-label').value.trim();
-  if (!url) return;
-  const r = await fetch('/api/urls', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url, label}) }).then(r => r.json());
-  if (r.ok) { closeModal('modal-add-url'); document.getElementById('url-value').value=''; document.getElementById('url-label').value=''; loadUrls(); }
-  else alert(r.msg);
+  const errEl = document.getElementById('url-error');
+  const btn   = document.querySelector('#modal-add-url .btn-primary');
+
+  errEl.style.display = 'block';
+  errEl.textContent = '';
+
+  if (!url) { errEl.textContent = '⚠️ Colle une URL Vinted.'; return; }
+  if (!url.includes('vinted.fr')) { errEl.textContent = "⚠️ L'URL doit venir de vinted.fr"; return; }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Ajout...';
+  errEl.textContent = '⏳ Connexion au serveur...';
+
+  try {
+    const resp = await fetch('/api/urls', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, label})
+    });
+    const r = await resp.json();
+    if (r.ok) {
+      closeModal('modal-add-url');
+      document.getElementById('url-value').value = '';
+      document.getElementById('url-label').value = '';
+      loadUrls();
+    } else {
+      errEl.textContent = '❌ ' + (r.msg || 'Erreur inconnue');
+    }
+  } catch(e) {
+    errEl.textContent = '❌ Serveur injoignable — lance demarrer.bat puis recharge la page. (' + e.message + ')';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Ajouter';
+  }
 }
 async function deleteUrl(id) { if (!confirm('Supprimer ?')) return; await fetch(`/api/urls/${id}`, {method:'DELETE'}); loadUrls(); }
 async function toggleUrl(id) { await fetch(`/api/urls/${id}/toggle`, {method:'POST'}); }
@@ -627,6 +766,7 @@ async function loadSettings() {
   document.getElementById('set-imax').value = s.interval_max || 300;
   document.getElementById('set-pmin').value = s.prix_min || 0;
   document.getElementById('set-pmax').value = s.prix_max || 9999;
+  document.getElementById('set-marge-alerte').value = s.marge_min_alerte || 0;
 }
 async function saveSettings() {
   await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
@@ -635,6 +775,7 @@ async function saveSettings() {
     interval_max: document.getElementById('set-imax').value,
     prix_min: document.getElementById('set-pmin').value,
     prix_max: document.getElementById('set-pmax').value,
+    marge_min_alerte: document.getElementById('set-marge-alerte').value,
   })});
   const msg = document.getElementById('save-msg');
   msg.textContent = '✓ Sauvegardé';
