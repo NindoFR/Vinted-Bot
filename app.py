@@ -63,6 +63,7 @@ def init_db():
             taille      TEXT,
             marque      TEXT,
             vendeur     TEXT,
+            etat        TEXT,
             url         TEXT,
             image_url   TEXT,
             search_url  TEXT,
@@ -71,6 +72,11 @@ def init_db():
             favori      INTEGER DEFAULT 0
         )
     """)
+    # Migration : ajouter la colonne etat si elle n'existe pas encore
+    try:
+        c.execute("ALTER TABLE articles ADD COLUMN etat TEXT DEFAULT ''")
+    except Exception:
+        pass
     c.execute("""
         CREATE TABLE IF NOT EXISTS watched_urls (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,6 +101,7 @@ def init_db():
         ("interval_max", "300"),
         ("prix_min", "0"),
         ("prix_max", "9999"),
+        ("marge_min_alerte", "0"),
     ]:
         c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (k, v))
     conn.commit()
@@ -133,27 +140,61 @@ def is_new(article_id: str) -> bool:
     conn.close()
     return r is None
 
+def calc_score(article: dict) -> int:
+    """Score d'opportunité 0-10 basé sur état + marge estimée + marque."""
+    score = 0
+    etat = (article.get("etat") or "").lower()
+    if "étiquette" in etat and "avec" in etat:
+        score += 3
+    elif "sans étiquette" in etat:
+        score += 2
+    elif "très bon" in etat:
+        score += 1
+    # Marge estimée (revente x1.5)
+    prix = article.get("prix", 0) or 0
+    revente = prix * 1.5
+    poids = 1200 if prix > 25 else (700 if prix > 15 else (400 if prix > 8 else 250))
+    port = 2.99 if poids <= 500 else (3.99 if poids <= 2000 else (5.99 if poids <= 5000 else 6.99))
+    fvinted = round(revente * 0.05 + 0.70, 2)
+    marge = revente - prix - fvinted - port
+    if marge >= 15:
+        score += 4
+    elif marge >= 8:
+        score += 3
+    elif marge >= 4:
+        score += 2
+    elif marge >= 0:
+        score += 1
+    # Marques premium connues
+    marque = (article.get("marque") or "").lower()
+    MARQUES_PREMIUM = {"nike","adidas","jordan","stone island","ralph lauren","tommy hilfiger",
+                       "lacoste","levi's","levis","north face","supreme","off-white","balenciaga",
+                       "gucci","louis vuitton","burberry","hugo boss","calvin klein","puma","new balance"}
+    if any(m in marque for m in MARQUES_PREMIUM):
+        score += 2
+    return min(score, 10)
+
 def save_article(article: dict):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
         INSERT OR IGNORE INTO articles
-        (id,titre,prix,taille,marque,vendeur,url,image_url,search_url,vu_le,alerte_sent)
-        VALUES (?,?,?,?,?,?,?,?,?,?,1)
+        (id,titre,prix,taille,marque,vendeur,etat,url,image_url,search_url,vu_le,alerte_sent)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
     """, (
         article["id"], article["titre"], article["prix"],
         article.get("taille",""), article.get("marque",""),
-        article.get("vendeur",""), article["url"],
-        article.get("image_url",""), article.get("search_url",""),
-        datetime.now().isoformat()
+        article.get("vendeur",""), article.get("etat",""),
+        article["url"], article.get("image_url",""),
+        article.get("search_url",""), datetime.now().isoformat()
     ))
     conn.commit()
     conn.close()
 
-def get_articles(limit=100, search="", marque="", prix_max=None, prix_min=None, taille="", favoris_only=False):
+def get_articles(limit=100, search="", marque="", prix_max=None, prix_min=None, taille="", favoris_only=False, etat=""):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    q = "SELECT id,titre,prix,taille,marque,vendeur,url,image_url,vu_le,favori FROM articles WHERE 1=1"
+    q = "SELECT id,titre,prix,taille,marque,vendeur,etat,url,image_url,vu_le,favori FROM articles WHERE 1=1"
     params = []
     if search:
         q += " AND (titre LIKE ? OR marque LIKE ? OR vendeur LIKE ?)"
@@ -170,14 +211,20 @@ def get_articles(limit=100, search="", marque="", prix_max=None, prix_min=None, 
     if taille:
         q += " AND taille=?"
         params.append(taille)
+    if etat:
+        q += " AND etat=?"
+        params.append(etat)
     if favoris_only:
         q += " AND favori=1"
     q += " ORDER BY vu_le DESC LIMIT ?"
     params.append(limit)
     c.execute(q, params)
-    cols = ["id","titre","prix","taille","marque","vendeur","url","image_url","vu_le","favori"]
+    cols = ["id","titre","prix","taille","marque","vendeur","etat","url","image_url","vu_le","favori"]
     rows = [dict(zip(cols, r)) for r in c.fetchall()]
     conn.close()
+    # Enrichir avec le score d'opportunité
+    for row in rows:
+        row["score"] = calc_score(row)
     return rows
 
 def get_stats():
@@ -213,21 +260,32 @@ def get_watched_urls():
 def send_discord_sync(article: dict, webhook_url: str):
     if not webhook_url:
         return
-    prix_str = f"{article['prix']:.2f} €" if article['prix'] else "N/A"
-    marge = round(article['prix'] * 0.30, 2) if article['prix'] else 0
+    prix = article['prix'] or 0
+    revente = round(prix * 1.5, 2)
+    poids = 1200 if prix > 25 else (700 if prix > 15 else (400 if prix > 8 else 250))
+    port = 2.99 if poids <= 500 else (3.99 if poids <= 2000 else (5.99 if poids <= 5000 else 6.99))
+    fvinted = round(revente * 0.05 + 0.70, 2)
+    marge_nette = round(revente - prix - fvinted - port, 2)
+    score = article.get("score", calc_score(article))
+    score_label = "💎 Excellent" if score >= 8 else ("🔥 Bonne affaire" if score >= 5 else ("✅ Correct" if score >= 3 else ""))
+    color = 0xFFD700 if score >= 8 else (0xFF4500 if score >= 5 else 0x09B1BA)
+    marge_str = f"+{marge_nette} €" if marge_nette >= 0 else f"{marge_nette} €"
+    etat = article.get("etat") or "—"
+    title_prefix = "💎" if score >= 8 else ("🔥" if score >= 5 else "🆕")
     embed = {
-        "title": f"🆕 {article['titre'][:200]}",
+        "title": f"{title_prefix} {article['titre'][:180]}",
         "url": article["url"],
-        "color": 0x09B1BA,
+        "color": color,
         "fields": [
-            {"name": "💶 Prix", "value": prix_str, "inline": True},
-            {"name": "📈 Marge +30%", "value": f"+{marge} €", "inline": True},
+            {"name": "💶 Prix achat", "value": f"{prix:.2f} €", "inline": True},
+            {"name": "📈 Revente x1.5", "value": f"{revente} €", "inline": True},
+            {"name": "💰 Marge nette", "value": marge_str, "inline": True},
+            {"name": "📦 État", "value": etat, "inline": True},
             {"name": "📏 Taille", "value": article.get("taille") or "—", "inline": True},
             {"name": "🏷️ Marque", "value": article.get("marque") or "—", "inline": True},
             {"name": "👤 Vendeur", "value": article.get("vendeur") or "—", "inline": True},
-            {"name": "🔗 Lien", "value": f"[Voir sur Vinted]({article['url']})", "inline": False},
         ],
-        "footer": {"text": f"Vinted Bot • {datetime.now().strftime('%d/%m %H:%M')}"},
+        "footer": {"text": f"Vinted Bot • {datetime.now().strftime('%d/%m %H:%M')}{' • ' + score_label if score_label else ''}"},
     }
     if article.get("image_url"):
         embed["thumbnail"] = {"url": article["image_url"]}
@@ -284,6 +342,7 @@ def run_bot():
         webhook = get_setting("discord_webhook")
         prix_max_filter = float(get_setting("prix_max") or 9999)
         prix_min_filter = float(get_setting("prix_min") or 0)
+        marge_min_alerte = float(get_setting("marge_min_alerte") or 0)
 
         for wu in active_urls:
             if not bot_state["running"]:
@@ -320,6 +379,7 @@ def run_bot():
                             "taille": item.get("size_title", ""),
                             "marque": item.get("brand_title", ""),
                             "vendeur": item.get("user", {}).get("login", "") if isinstance(item.get("user"), dict) else "",
+                            "etat": item.get("status_title", item.get("condition_title", item.get("status", ""))),
                             "url": art_url,
                             "image_url": photo_url,
                             "search_url": wu["url"]
@@ -346,6 +406,7 @@ def run_bot():
                                 "taille": item.get("size_title", ""),
                                 "marque": item.get("brand_title", ""),
                                 "vendeur": item.get("user", {}).get("login", "") if isinstance(item.get("user"), dict) else "",
+                                "etat": item.get("status_title", item.get("condition_title", item.get("status", ""))),
                                 "url": f"https://www.vinted.fr/items/{art_id}",
                                 "image_url": photo_url,
                                 "search_url": wu["url"]
@@ -358,12 +419,23 @@ def run_bot():
                     if art["prix"] < prix_min_filter:
                         continue
                     if is_new(art["id"]):
+                        score = calc_score(art)
+                        art["score"] = score
                         save_article(art)
                         new_count += 1
                         bot_state["new_today"] += 1
-                        push_log(f"  ✅ Nouveau: {art['titre'][:40]} — {art['prix']}€", "success")
+                        score_label = " 💎" if score >= 8 else (" 🔥" if score >= 5 else "")
+                        push_log(f"  ✅ Nouveau: {art['titre'][:35]} — {art['prix']}€{score_label}", "success")
                         if webhook:
-                            threading.Thread(target=send_discord_sync, args=(art, webhook), daemon=True).start()
+                            # Vérifier marge minimum avant d'alerter
+                            prix = art["prix"]
+                            revente = prix * 1.5
+                            poids = 1200 if prix > 25 else (700 if prix > 15 else (400 if prix > 8 else 250))
+                            port = 2.99 if poids <= 500 else (3.99 if poids <= 2000 else (5.99 if poids <= 5000 else 6.99))
+                            fvinted = round(revente * 0.05 + 0.70, 2)
+                            marge_nette = revente - prix - fvinted - port
+                            if marge_nette >= marge_min_alerte:
+                                threading.Thread(target=send_discord_sync, args=(art, webhook), daemon=True).start()
                         time.sleep(random.uniform(0.3, 0.8))
 
                 # Update last_scan
@@ -416,6 +488,7 @@ def api_articles():
     search = request.args.get("search", "")
     marque = request.args.get("marque", "")
     taille = request.args.get("taille", "")
+    etat   = request.args.get("etat", "")
     prix_max = request.args.get("prix_max")
     prix_min = request.args.get("prix_min")
     favoris = request.args.get("favoris") == "1"
@@ -424,7 +497,7 @@ def api_articles():
         limit, search, marque,
         float(prix_max) if prix_max else None,
         float(prix_min) if prix_min else None,
-        taille, favoris
+        taille, favoris, etat
     ))
 
 @app.route("/api/articles/export")
@@ -433,7 +506,7 @@ def api_articles_export():
     favoris = request.args.get("favoris") == "1"
     articles = get_articles(limit=99999, favoris_only=favoris)
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=["id","titre","prix","taille","marque","vendeur","url","image_url","vu_le","favori"])
+    writer = csv.DictWriter(output, fieldnames=["id","titre","prix","taille","marque","vendeur","etat","score","url","image_url","vu_le","favori"])
     writer.writeheader()
     writer.writerows(articles)
     return Response(
@@ -441,6 +514,17 @@ def api_articles_export():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=vinted_articles.csv"}
     )
+
+@app.route("/api/etats")
+def api_etats():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT etat FROM articles WHERE etat!='' ORDER BY etat")
+    etats = [r[0] for r in c.fetchall()]
+    conn.close()
+    # Ordre logique
+    ordre = ["Neuf avec étiquette","Neuf sans étiquette","Très bon état","Bon état","Satisfaisant"]
+    return jsonify(sorted(etats, key=lambda e: ordre.index(e) if e in ordre else 99))
 
 @app.route("/api/tailles")
 def api_tailles():
@@ -558,7 +642,7 @@ def api_urls_toggle(uid):
 
 @app.route("/api/settings", methods=["GET"])
 def api_settings_get():
-    keys = ["discord_webhook","interval_min","interval_max","prix_min","prix_max"]
+    keys = ["discord_webhook","interval_min","interval_max","prix_min","prix_max","marge_min_alerte"]
     return jsonify({k: get_setting(k) for k in keys})
 
 @app.route("/api/settings", methods=["POST"])
