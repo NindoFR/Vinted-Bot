@@ -19,9 +19,16 @@ from flask import Flask, render_template, jsonify, request, Response
 import httpx
 
 app = Flask(__name__)
-DB_PATH = Path("data/vinted.db")
-DB_PATH.parent.mkdir(exist_ok=True)
-Path("logs").mkdir(exist_ok=True)
+
+# Sur Railway (ou tout environnement cloud), les dossiers relatifs sont éphémères.
+# On utilise /tmp si on n'est pas en local.
+import os
+_IS_CLOUD = os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("PORT")
+_BASE_DIR = Path("/tmp") if _IS_CLOUD else Path(".")
+DB_PATH = _BASE_DIR / "data" / "vinted.db"
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+_LOG_DIR = _BASE_DIR / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── State global du bot ──────────────────────────────────────────────────────
 bot_state = {
@@ -38,7 +45,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
-        logging.FileHandler("logs/bot.log", encoding="utf-8"),
+        logging.FileHandler(_LOG_DIR / "bot.log", encoding="utf-8"),
         logging.StreamHandler()
     ]
 )
@@ -676,7 +683,9 @@ def api_marques():
 def index():
     return render_template("index.html")
 
+# Initialisation au démarrage — fonctionne avec gunicorn ET python app.py
+init_db()
+
 if __name__ == "__main__":
-    init_db()
     log.info("Vinted Bot démarré → http://localhost:5000")
     app.run(debug=False, host="0.0.0.0", port=5000, threaded=True)
