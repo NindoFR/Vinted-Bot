@@ -150,7 +150,7 @@ def save_article(article: dict):
     conn.commit()
     conn.close()
 
-def get_articles(limit=100, search="", marque="", prix_max=None):
+def get_articles(limit=100, search="", marque="", prix_max=None, prix_min=None, taille="", favoris_only=False):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     q = "SELECT id,titre,prix,taille,marque,vendeur,url,image_url,vu_le,favori FROM articles WHERE 1=1"
@@ -161,9 +161,17 @@ def get_articles(limit=100, search="", marque="", prix_max=None):
     if marque:
         q += " AND marque=?"
         params.append(marque)
-    if prix_max:
+    if prix_max is not None:
         q += " AND prix<=?"
         params.append(prix_max)
+    if prix_min is not None:
+        q += " AND prix>=?"
+        params.append(prix_min)
+    if taille:
+        q += " AND taille=?"
+        params.append(taille)
+    if favoris_only:
+        q += " AND favori=1"
     q += " ORDER BY vu_le DESC LIMIT ?"
     params.append(limit)
     c.execute(q, params)
@@ -275,6 +283,7 @@ def run_bot():
 
         webhook = get_setting("discord_webhook")
         prix_max_filter = float(get_setting("prix_max") or 9999)
+        prix_min_filter = float(get_setting("prix_min") or 0)
 
         for wu in active_urls:
             if not bot_state["running"]:
@@ -346,6 +355,8 @@ def run_bot():
                 for art in articles_found:
                     if art["prix"] > prix_max_filter:
                         continue
+                    if art["prix"] < prix_min_filter:
+                        continue
                     if is_new(art["id"]):
                         save_article(art)
                         new_count += 1
@@ -379,6 +390,12 @@ def run_bot():
         bot_state["last_scan"] = datetime.now().strftime("%H:%M:%S")
         bot_state["scan_count"] += 1
 
+        if bot_state.get("scan_once"):
+            bot_state["scan_once"] = False
+            bot_state["running"] = False
+            push_log("Scan unique terminé", "success")
+            break
+
         interval_min = int(get_setting("interval_min") or 120)
         interval_max = int(get_setting("interval_max") or 300)
         wait = random.uniform(interval_min, interval_max)
@@ -398,9 +415,62 @@ def run_bot():
 def api_articles():
     search = request.args.get("search", "")
     marque = request.args.get("marque", "")
+    taille = request.args.get("taille", "")
     prix_max = request.args.get("prix_max")
-    limit = int(request.args.get("limit", 100))
-    return jsonify(get_articles(limit, search, marque, float(prix_max) if prix_max else None))
+    prix_min = request.args.get("prix_min")
+    favoris = request.args.get("favoris") == "1"
+    limit = int(request.args.get("limit", 9999))
+    return jsonify(get_articles(
+        limit, search, marque,
+        float(prix_max) if prix_max else None,
+        float(prix_min) if prix_min else None,
+        taille, favoris
+    ))
+
+@app.route("/api/articles/export")
+def api_articles_export():
+    import csv, io
+    favoris = request.args.get("favoris") == "1"
+    articles = get_articles(limit=99999, favoris_only=favoris)
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["id","titre","prix","taille","marque","vendeur","url","image_url","vu_le","favori"])
+    writer.writeheader()
+    writer.writerows(articles)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=vinted_articles.csv"}
+    )
+
+@app.route("/api/tailles")
+def api_tailles():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT taille FROM articles WHERE taille!='' ORDER BY taille")
+    tailles = [r[0] for r in c.fetchall()]
+    conn.close()
+    return jsonify(tailles)
+
+@app.route("/api/discord/test", methods=["POST"])
+def api_discord_test():
+    webhook = get_setting("discord_webhook")
+    if not webhook:
+        return jsonify({"ok": False, "msg": "Aucun webhook configuré"})
+    try:
+        import requests as req
+        r = req.post(webhook, json={
+            "embeds": [{
+                "title": "✅ Test Vinted Bot",
+                "description": "La connexion Discord fonctionne correctement !",
+                "color": 0x09B1BA,
+                "footer": {"text": f"Vinted Bot • {datetime.now().strftime('%d/%m %H:%M')}"}
+            }]
+        }, timeout=8)
+        if r.status_code in (200, 204):
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "msg": f"Discord a répondu {r.status_code}"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)})
 
 @app.route("/api/stats")
 def api_stats():
@@ -430,6 +500,18 @@ def api_bot_start():
 @app.route("/api/bot/stop", methods=["POST"])
 def api_bot_stop():
     bot_state["running"] = False
+    return jsonify({"ok": True})
+
+@app.route("/api/bot/scan-now", methods=["POST"])
+def api_bot_scan_now():
+    if bot_state["running"]:
+        return jsonify({"ok": False, "msg": "Bot déjà en cours, il scannera à son prochain cycle"})
+    bot_state["running"] = True
+    bot_state["scan_once"] = True
+    def run_once():
+        run_bot()
+    t = threading.Thread(target=run_once, daemon=True)
+    t.start()
     return jsonify({"ok": True})
 
 @app.route("/api/urls", methods=["GET"])
