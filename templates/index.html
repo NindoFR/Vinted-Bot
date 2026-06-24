@@ -355,6 +355,7 @@ select.input { cursor: pointer; }
     <h3>➕ Ajouter une recherche</h3>
     <div class="form-group"><label class="form-label">Nom de la recherche</label><input class="input full" id="url-label" placeholder="ex: Under Armour taille M moins de 15€"></div>
     <div class="form-group"><label class="form-label">URL Vinted (copie depuis la barre d'adresse)</label><textarea class="input full" id="url-value" rows="3" placeholder="https://www.vinted.fr/catalog?..." style="resize:vertical;font-size:11px;font-family:monospace;"></textarea></div>
+    <div id="url-error" style="font-size:12px;color:var(--red);margin-bottom:8px;min-height:16px;"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('modal-add-url')">Annuler</button>
       <button class="btn btn-primary" onclick="addUrl()">Ajouter</button>
@@ -709,12 +710,33 @@ async function loadUrls() {
 }
 function openAddUrl() { document.getElementById('modal-add-url').classList.add('open'); }
 async function addUrl() {
-  const url = document.getElementById('url-value').value.trim();
+  const url   = document.getElementById('url-value').value.trim();
   const label = document.getElementById('url-label').value.trim();
-  if (!url) return;
-  const r = await fetch('/api/urls', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({url, label}) }).then(r => r.json());
-  if (r.ok) { closeModal('modal-add-url'); document.getElementById('url-value').value=''; document.getElementById('url-label').value=''; loadUrls(); }
-  else alert(r.msg);
+  const errEl = document.getElementById('url-error');
+  errEl.textContent = '';
+  if (!url) { errEl.textContent = 'Colle une URL Vinted.'; return; }
+  if (!url.includes('vinted.fr')) { errEl.textContent = "L'URL doit venir de vinted.fr"; return; }
+  const btn = document.querySelector('#modal-add-url .btn-primary');
+  btn.disabled = true; btn.textContent = '⏳ Ajout...';
+  try {
+    const r = await fetch('/api/urls', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, label})
+    }).then(r => r.json());
+    if (r.ok) {
+      closeModal('modal-add-url');
+      document.getElementById('url-value').value = '';
+      document.getElementById('url-label').value = '';
+      loadUrls();
+    } else {
+      errEl.textContent = r.msg || 'Erreur inconnue';
+    }
+  } catch(e) {
+    errEl.textContent = 'Impossible de joindre le serveur. Le bot est-il lancé ?';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Ajouter';
+  }
 }
 async function deleteUrl(id) { if (!confirm('Supprimer ?')) return; await fetch(`/api/urls/${id}`, {method:'DELETE'}); loadUrls(); }
 async function toggleUrl(id) { await fetch(`/api/urls/${id}/toggle`, {method:'POST'}); }

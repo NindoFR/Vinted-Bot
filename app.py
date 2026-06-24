@@ -124,12 +124,13 @@ def set_setting(key, value):
 
 def normalize_url(url: str) -> str:
     parsed = urlparse(url)
-    params = parse_qs(parsed.query)
+    params = parse_qs(parsed.query, keep_blank_values=True)
     for k in ["search_id", "time"]:
         params.pop(k, None)
     params["page"] = ["1"]
     params["order"] = ["newest_first"]
-    new_query = urlencode({k: v[0] for k, v in params.items()})
+    # Conserver les multi-valeurs (size_ids[], brand_ids[]...)
+    new_query = urlencode({k: v if len(v) > 1 else v[0] for k, v in params.items()}, doseq=True)
     return urlunparse(parsed._replace(query=new_query))
 
 def is_new(article_id: str) -> bool:
