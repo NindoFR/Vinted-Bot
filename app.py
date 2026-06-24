@@ -177,7 +177,8 @@ def calc_score(article: dict) -> int:
     marque = (article.get("marque") or "").lower()
     MARQUES_PREMIUM = {"nike","adidas","jordan","stone island","ralph lauren","tommy hilfiger",
                        "lacoste","levi's","levis","north face","supreme","off-white","balenciaga",
-                       "gucci","louis vuitton","burberry","hugo boss","calvin klein","puma","new balance"}
+                       "gucci","louis vuitton","burberry","hugo boss","calvin klein","puma","new balance",
+                       "under armour","underarmour"}
     if any(m in marque for m in MARQUES_PREMIUM):
         score += 2
     return min(score, 10)
@@ -230,7 +231,6 @@ def get_articles(limit=100, search="", marque="", prix_max=None, prix_min=None, 
     cols = ["id","titre","prix","taille","marque","vendeur","etat","url","image_url","vu_le","favori"]
     rows = [dict(zip(cols, r)) for r in c.fetchall()]
     conn.close()
-    # Enrichir avec le score d'opportunité
     for row in rows:
         row["score"] = calc_score(row)
     return rows
@@ -331,7 +331,6 @@ def run_bot():
         "Referer": "https://www.vinted.fr/",
     })
 
-    # Récupérer cookies en visitant d'abord la home
     try:
         session.get("https://www.vinted.fr/", timeout=15)
         time.sleep(2)
@@ -360,7 +359,6 @@ def run_bot():
             push_log(f"Scan: {wu['label'] or clean_url[:50]}...")
 
             try:
-                # Appel API JSON Vinted (plus fiable que HTML)
                 api_url = clean_url.replace("vinted.fr/catalog", "vinted.fr/api/v2/catalog/items")
                 r = session.get(api_url, timeout=20, params={"per_page": 48})
 
@@ -393,10 +391,8 @@ def run_bot():
                             "search_url": wu["url"]
                         })
                 else:
-                    # Fallback HTML
                     r2 = session.get(clean_url, timeout=20)
                     soup = BeautifulSoup(r2.text, "html.parser")
-                    # Chercher __NEXT_DATA__
                     script = soup.find("script", {"id": "__NEXT_DATA__"})
                     if script:
                         nd = json.loads(script.string)
@@ -435,7 +431,6 @@ def run_bot():
                         score_label = " 💎" if score >= 8 else (" 🔥" if score >= 5 else "")
                         push_log(f"  ✅ Nouveau: {art['titre'][:35]} — {art['prix']}€{score_label}", "success")
                         if webhook:
-                            # Vérifier marge minimum avant d'alerter
                             prix = art["prix"]
                             revente = prix * 1.5
                             poids = 1200 if prix > 25 else (700 if prix > 15 else (400 if prix > 8 else 250))
@@ -446,7 +441,6 @@ def run_bot():
                                 threading.Thread(target=send_discord_sync, args=(art, webhook), daemon=True).start()
                         time.sleep(random.uniform(0.3, 0.8))
 
-                # Update last_scan
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute("UPDATE watched_urls SET last_scan=?, articles_found=articles_found+? WHERE id=?",
@@ -463,7 +457,6 @@ def run_bot():
                 push_log(f"Erreur scan: {e}", "error")
                 log.error(f"Scan error: {e}")
 
-            # Délai entre URLs
             if len(active_urls) > 1:
                 time.sleep(random.uniform(4, 8))
 
@@ -481,7 +474,6 @@ def run_bot():
         wait = random.uniform(interval_min, interval_max)
         push_log(f"Prochain scan dans {int(wait)}s")
 
-        # Attente interruptible
         for _ in range(int(wait)):
             if not bot_state["running"]:
                 break
@@ -530,7 +522,6 @@ def api_etats():
     c.execute("SELECT DISTINCT etat FROM articles WHERE etat!='' ORDER BY etat")
     etats = [r[0] for r in c.fetchall()]
     conn.close()
-    # Ordre logique
     ordre = ["Neuf avec étiquette","Neuf sans étiquette","Très bon état","Bon état","Satisfaisant"]
     return jsonify(sorted(etats, key=lambda e: ordre.index(e) if e in ordre else 99))
 
@@ -600,9 +591,7 @@ def api_bot_scan_now():
         return jsonify({"ok": False, "msg": "Bot déjà en cours, il scannera à son prochain cycle"})
     bot_state["running"] = True
     bot_state["scan_once"] = True
-    def run_once():
-        run_bot()
-    t = threading.Thread(target=run_once, daemon=True)
+    t = threading.Thread(target=run_bot, daemon=True)
     t.start()
     return jsonify({"ok": True})
 
